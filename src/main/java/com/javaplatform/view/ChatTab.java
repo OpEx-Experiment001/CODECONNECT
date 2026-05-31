@@ -187,7 +187,8 @@ public class ChatTab extends Tab {
         Thread t = new Thread(() -> {
             try {
                 disconnect();
-                Socket socket = new Socket(SessionState.getInstance().getServerHost(), SessionState.CHAT_PORT);
+                Socket socket = new Socket();
+                socket.connect(new java.net.InetSocketAddress(SessionState.getInstance().getServerHost(), SessionState.CHAT_PORT), 1500);
                 currentSocket = socket;
                 BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
                 out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
@@ -252,7 +253,13 @@ public class ChatTab extends Tab {
 
     private void showMessage(String rawMsg) {
         if (rawMsg.startsWith("SYSTEM:")) {
-            showSystemMessage(rawMsg.substring(7).trim());
+            String sysMsg = rawMsg.substring(7).trim();
+            showSystemMessage(sysMsg);
+            if (sysMsg.contains("joined the chat")) {
+                if (MainWindow.getCompilerTab() != null) {
+                    MainWindow.getCompilerTab().onPeerJoinedChat();
+                }
+            }
             return;
         }
 

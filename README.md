@@ -4,6 +4,22 @@ A **highly scalable, production-ready Java platform** for collaborative learning
 
 ---
 
+## 👥 Team
+
+1. **Devank Kashyap**
+   - [GitHub Repository](https://github.com/devank26/CODECONNECT)
+
+2. **Aadarsh Dimri**
+   - [GitHub Repository](https://github.com/OpEx-Experiment001/CODECONNECT)
+
+3. **Prince Badola**
+   - [GitHub Repository](https://github.com/Prince20251337/Jarvis-IDE)
+
+4. **Vaibhav Kathait**
+   - [GitHub Profile](https://github.com/Vaibhav27-az)
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)

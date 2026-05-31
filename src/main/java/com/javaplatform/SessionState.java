@@ -8,7 +8,7 @@ public class SessionState {
     private static SessionState instance;
 
     private String username = "User";
-    private String serverHost = "localhost";
+    private String serverHost = "127.0.0.1";
 
     // Server ports (all embedded in same JVM)
     public static final int    CHAT_PORT     = 9001;

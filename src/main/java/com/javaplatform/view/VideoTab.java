@@ -24,6 +24,7 @@ public class VideoTab extends Tab {
     private final Label     statusLabel = new Label("Not connected");
     private final TextField roomField   = new TextField();
     private final Label     roomIdLabel = new Label("");
+    private final Label     ipLabel     = new Label("");
     private final Button    muteBtn    = new Button("🎤  Mute");
     private final Button    camBtn     = new Button("📷  Camera Off");
     private final Button    createBtn  = new Button("Create Room");
@@ -43,6 +44,8 @@ public class VideoTab extends Tab {
 
     private VideoService videoService;
     private boolean muted = false;
+    /** Room ID that this instance is currently hosting/connected to. */
+    private String activeRoomId = null;
 
     public VideoTab() {
         super("📹  Video Call");
@@ -84,9 +87,31 @@ public class VideoTab extends Tab {
 
         // ── Room controls ─────────────────────────────────────────────────
         createBtn.setOnAction(e -> {
-            String myIp = getLocalIPAddress();
-            String myRoomId = encodeIpToRoomId(myIp);
-            videoService.createRoom(myRoomId);
+            createBtn.setDisable(true);
+            createBtn.setText("⏳ Resolving...");
+            new Thread(() -> {
+                String localIp  = getLocalIPAddress();
+                String publicIp = getPublicIPAddress();
+                String baseRoomId = encodeIpsToRoomId(localIp, publicIp);
+
+                // Start WAN relay tunnel (SSH to serveo.net) in parallel.
+                // Update the Room ID label once the relay address is known.
+                Platform.runLater(() -> statusLabel.setText("⏳ Starting WAN relay tunnel..."));
+                com.javaplatform.server.AppServer.startRelayTunnel(relay -> {
+                    String finalRoomId = (relay != null) ? baseRoomId + "~" + relay : baseRoomId;
+                    if (relay != null) {
+                        System.out.println("[VideoTab] WAN relay ready: " + relay + " -> Room ID: " + finalRoomId);
+                    } else {
+                        System.out.println("[VideoTab] No WAN relay (SSH unavailable). Using LAN Room ID: " + finalRoomId);
+                    }
+                    // Must call reconnect on FX thread
+                    javafx.application.Platform.runLater(() -> {
+                        createBtn.setDisable(false);
+                        createBtn.setText("Create Room");
+                        reconnectVideoAndChat("127.0.0.1", finalRoomId, true);
+                    });
+                });
+            }, "public-ip-resolver").start();
         });
 
         roomField.setPromptText("Room ID…");
@@ -94,19 +119,37 @@ public class VideoTab extends Tab {
 
         joinBtn.setOnAction(e -> {
             String enteredRoomId = roomField.getText().trim();
-            if (!enteredRoomId.isEmpty()) {
-                String decodedHost = decodeRoomIdToIp(enteredRoomId);
-                reconnectVideoAndChat(decodedHost, enteredRoomId);
+            if (enteredRoomId.isEmpty()) return;
+
+            // Guard: prevent the user from joining their own active room.
+            // Doing so would disconnect the existing VideoService (killing the hosted room)
+            // and then fail to reconnect — resulting in the "unreachable" error.
+            if (enteredRoomId.equals(activeRoomId)) {
+                ThemeManager tm = ThemeManager.getInstance();
+                statusLabel.setText("⚠ You are already hosting this room — share the ID with your peer");
+                statusLabel.setStyle("-fx-text-fill: #f59e0b; -fx-font-size: 12px;");
+                return;
             }
+
+            reconnectVideoAndChat("", enteredRoomId, false);
         });
 
-        leaveBtn.setOnAction(e -> videoService.leaveRoom());
+        leaveBtn.setOnAction(e -> {
+            com.javaplatform.server.AppServer.stopRelayTunnel();
+            activeRoomId = null;
+            if (videoService != null) videoService.leaveRoom();
+        });
         leaveBtn.setDisable(true);
 
         roomControls = new HBox(10, createBtn, new Separator(),
-                roomField, joinBtn, new Separator(), leaveBtn, roomIdLabel);
+                roomField, joinBtn, new Separator(), leaveBtn, roomIdLabel, ipLabel);
         roomControls.setAlignment(Pos.CENTER);
         roomControls.setPadding(new Insets(10));
+
+        new Thread(() -> {
+            String localIp = getLocalIPAddress();
+            Platform.runLater(() -> ipLabel.setText(" |  Your IP: " + localIp + " (LAN)"));
+        }, "ui-ip-resolver").start();
 
         // ── Call controls ─────────────────────────────────────────────────
         muteBtn.setOnAction(e -> toggleMute());
@@ -168,6 +211,7 @@ public class VideoTab extends Tab {
         roomControls.setStyle("-fx-background-color: " + tm.bgApp() + ";");
         roomField.setStyle(tm.getTextFieldStyle(13));
         roomIdLabel.setStyle("-fx-text-fill: " + tm.warningColor() + "; -fx-font-size: 13px; -fx-font-family: 'Consolas'; -fx-font-weight: bold;");
+        ipLabel.setStyle("-fx-text-fill: " + tm.textMuted() + "; -fx-font-size: 12px; -fx-font-family: 'Segoe UI';");
 
         // Buttons
         createBtn.setStyle(tm.getButtonStyle(tm.runColor()));
@@ -263,9 +307,10 @@ public class VideoTab extends Tab {
         );
 
         // Connect in background
+        final VideoService serviceInstance = videoService;
         new Thread(() -> {
             try {
-                videoService.connect();
+                serviceInstance.connect();
                 Platform.runLater(() -> {
                     ThemeManager tm = ThemeManager.getInstance();
                     statusLabel.setText("● Connected to video server");
@@ -338,19 +383,88 @@ public class VideoTab extends Tab {
         }
     }
 
+    public static String getPublicIPAddress() {
+        String[] services = {
+            "https://api.ipify.org",
+            "http://checkip.amazonaws.com",
+            "https://ipv4.icanhazip.com"
+        };
+        for (String service : services) {
+            try (java.io.BufferedReader in = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(new java.net.URL(service).openStream(), "UTF-8"))) {
+                String ip = in.readLine().trim();
+                if (ip.matches("^(\\d{1,3}\\.){3}\\d{1,3}$")) {
+                    System.out.println("[VideoTab] Successfully resolved public IP: " + ip + " via " + service);
+                    return ip;
+                }
+            } catch (Exception ignored) {}
+        }
+        System.out.println("[VideoTab] Public IP resolution failed. Falling back to active local IP.");
+        return getLocalIPAddress();
+    }
+
     public static String getLocalIPAddress() {
+        // Phase 1: Prefer virtual LAN adapters (Hamachi, Radmin VPN, ZeroTier) — enables global P2P via virtual LANs
+        String virtualLanKeywords[] = {"hamachi", "radmin", "zerotier", "zero tier"};
         try {
             java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 java.net.NetworkInterface iface = interfaces.nextElement();
                 if (iface.isLoopback() || !iface.isUp()) continue;
+                String name = iface.getName().toLowerCase();
+                String displayName = iface.getDisplayName().toLowerCase();
+                boolean isVirtualLan = false;
+                for (String kw : virtualLanKeywords) {
+                    if (name.contains(kw) || displayName.contains(kw)) { isVirtualLan = true; break; }
+                }
+                if (!isVirtualLan) continue;
                 java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     java.net.InetAddress addr = addresses.nextElement();
                     if (addr instanceof java.net.Inet4Address) {
-                        return addr.getHostAddress();
+                        String ip = addr.getHostAddress();
+                        if (!ip.equals("127.0.0.1") && !ip.equals("0.0.0.0")) {
+                            System.out.println("[VideoTab] Resolved IP via virtual LAN adapter (" + displayName + "): " + ip);
+                            return ip;
+                        }
                     }
                 }
+            }
+        } catch (Exception ignored) {}
+
+        // Phase 2: Physical adapters — exclude VPN/virtual adapters
+        String[] excludeKeywords = {"vpn", "tun", "tap", "ppp", "proton", "vbox", "virtual", "vmnet", "wsl", "hamachi", "radmin", "zerotier"};
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                java.net.NetworkInterface iface = interfaces.nextElement();
+                if (iface.isLoopback() || !iface.isUp()) continue;
+                String name = iface.getName().toLowerCase();
+                String displayName = iface.getDisplayName().toLowerCase();
+                boolean exclude = false;
+                for (String kw : excludeKeywords) {
+                    if (name.contains(kw) || displayName.contains(kw)) { exclude = true; break; }
+                }
+                if (exclude) continue;
+                java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    java.net.InetAddress addr = addresses.nextElement();
+                    if (addr instanceof java.net.Inet4Address) {
+                        String ip = addr.getHostAddress();
+                        if (!ip.equals("127.0.0.1") && !ip.equals("0.0.0.0")) {
+                            return ip;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // Phase 3: DatagramSocket routing fallback
+        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
+            socket.connect(java.net.InetAddress.getByName("8.8.8.8"), 10002);
+            String ip = socket.getLocalAddress().getHostAddress();
+            if (ip != null && !ip.isEmpty() && !ip.equals("0.0.0.0")) {
+                return ip;
             }
         } catch (Exception ignored) {}
         try {
@@ -360,55 +474,171 @@ public class VideoTab extends Tab {
         }
     }
 
-    public static String encodeIpToRoomId(String ip) {
+    public static String encodeIpsToRoomId(String localIp, String publicIp) {
         try {
-            String[] parts = ip.split("\\.");
-            if (parts.length != 4) return "LOCAL";
-            long val = 0;
-            for (int i = 0; i < 4; i++) {
-                val = (val << 8) | (Integer.parseInt(parts[i]) & 0xFF);
-            }
-            return Long.toString(val, 36).toUpperCase();
+            byte[] ip1 = ipToBytes(publicIp);
+            byte[] ip2 = ipToBytes(localIp);
+            byte[] salt = new byte[2];
+            new java.security.SecureRandom().nextBytes(salt);
+            
+            byte[] combined = new byte[11];
+            System.arraycopy(ip1, 0, combined, 1, 4);
+            System.arraycopy(ip2, 0, combined, 5, 4);
+            System.arraycopy(salt, 0, combined, 9, 2);
+            
+            java.math.BigInteger bi = new java.math.BigInteger(combined);
+            return bi.toString(36).toUpperCase();
         } catch (Exception e) {
             return "LOCAL";
         }
     }
 
-    public static String decodeRoomIdToIp(String roomId) {
+    public static String[] decodeRoomIdToIps(String roomId) {
         try {
-            long val = Long.parseLong(roomId.toLowerCase(), 36);
-            int p1 = (int) ((val >> 24) & 0xFF);
-            int p2 = (int) ((val >> 16) & 0xFF);
-            int p3 = (int) ((val >> 8) & 0xFF);
-            int p4 = (int) (val & 0xFF);
-            return p1 + "." + p2 + "." + p3 + "." + p4;
+            roomId = roomId.trim().toUpperCase();
+            if (roomId.length() <= 8) {
+                long val = Long.parseUnsignedLong(roomId.toLowerCase(), 36);
+                String ip = longToIp(val);
+                return new String[] { ip, ip };
+            }
+            java.math.BigInteger bi = new java.math.BigInteger(roomId.toLowerCase(), 36);
+            byte[] bytes = bi.toByteArray();
+            byte[] target = new byte[11];
+            if (bytes.length <= 11) {
+                System.arraycopy(bytes, 0, target, 11 - bytes.length, bytes.length);
+            } else {
+                System.arraycopy(bytes, bytes.length - 11, target, 0, 11);
+            }
+            String publicIp = bytesToIp(target, 1);
+            String localIp = bytesToIp(target, 5);
+            return new String[] { publicIp, localIp };
         } catch (Exception e) {
-            return "127.0.0.1";
+            return new String[] { "127.0.0.1", "127.0.0.1" };
         }
     }
 
-    private void reconnectVideoAndChat(String host, String roomId) {
-        SessionState.getInstance().setServerHost(host);
-
-        if (MainWindow.getChatTab() != null) {
-            MainWindow.getChatTab().reconnectToHost(host);
+    private static byte[] ipToBytes(String ip) {
+        try {
+            String[] parts = ip.split("\\.");
+            byte[] bytes = new byte[4];
+            for (int i = 0; i < 4; i++) {
+                bytes[i] = (byte) (Integer.parseInt(parts[i]) & 0xFF);
+            }
+            return bytes;
+        } catch (Exception e) {
+            return new byte[]{127, 0, 0, 1};
         }
+    }
 
+    private static String bytesToIp(byte[] bytes, int offset) {
+        int p1 = bytes[offset] & 0xFF;
+        int p2 = bytes[offset + 1] & 0xFF;
+        int p3 = bytes[offset + 2] & 0xFF;
+        int p4 = bytes[offset + 3] & 0xFF;
+        return p1 + "." + p2 + "." + p3 + "." + p4;
+    }
+
+    private static java.util.List<String> discoverLocalHosts() {
+        java.util.List<String> found = new java.util.concurrent.CopyOnWriteArrayList<>();
+        String localIp = getLocalIPAddress();
+        if (localIp == null || localIp.equals("127.0.0.1") || !localIp.contains(".")) {
+            return found;
+        }
+        int lastDot = localIp.lastIndexOf('.');
+        String prefix = localIp.substring(0, lastDot + 1);
+        
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(64);
+        java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        for (int i = 1; i <= 254; i++) {
+            final String targetIp = prefix + i;
+            if (targetIp.equals(localIp)) continue;
+            futures.add(executor.submit(() -> {
+                try (java.net.Socket s = new java.net.Socket()) {
+                    s.connect(new java.net.InetSocketAddress(targetIp, SessionState.VIDEO_PORT), 300);
+                    found.add(targetIp);
+                } catch (Exception ignored) {}
+            }));
+        }
+        for (java.util.concurrent.Future<?> f : futures) {
+            try {
+                f.get(400, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Exception ignored) {}
+        }
+        executor.shutdownNow();
+        return found;
+    }
+
+    private static long ipToLong(String ip) {
+        String[] parts = ip.split("\\.");
+        long val = 0;
+        for (int i = 0; i < 4; i++) {
+            val = (val << 8) | (Integer.parseInt(parts[i]) & 0xFF);
+        }
+        return val;
+    }
+
+    private static String longToIp(long val) {
+        int p1 = (int) ((val >> 24) & 0xFF);
+        int p2 = (int) ((val >> 16) & 0xFF);
+        int p3 = (int) ((val >> 8) & 0xFF);
+        int p4 = (int) (val & 0xFF);
+        return p1 + "." + p2 + "." + p3 + "." + p4;
+    }
+
+    private void reconnectVideoAndChat(String host, String roomId, boolean isCreate) {
         if (videoService != null) {
             videoService.disconnect();
         }
 
         Platform.runLater(() -> {
             ThemeManager tm = ThemeManager.getInstance();
-            statusLabel.setText("⚡ Connecting to video server at " + host + "…");
+            statusLabel.setText("⚡ Connecting to video server…");
             statusLabel.setStyle("-fx-text-fill: " + tm.textMuted() + "; -fx-font-size: 12px;");
             reconnectBtn.setVisible(false);
             reconnectBtn.setManaged(false);
         });
 
         String username = SessionState.getInstance().getUsername();
-        videoService = new VideoService(
-                host, SessionState.VIDEO_PORT, username,
+        
+        // Strip optional WAN relay suffix "BASE36~host:port" before decoding IPs
+        final String relayTarget;  // e.g. "serveo.net:12345" or null
+        final String cleanRoomId;  // base36 portion only
+        if (roomId.contains("~")) {
+            int idx = roomId.indexOf('~');
+            cleanRoomId = roomId.substring(0, idx);
+            relayTarget = roomId.substring(idx + 1);
+        } else {
+            cleanRoomId = roomId;
+            relayTarget = null;
+        }
+
+        final String localTarget;
+        final String publicTarget;
+        final String actualRoomId;
+        if (isCreate || host.equals("localhost") || host.equals("127.0.0.1")) {
+            localTarget = "127.0.0.1";
+            publicTarget = "127.0.0.1";
+            actualRoomId = cleanRoomId;
+        } else if (cleanRoomId.matches("^(\\d{1,3}\\.){3}\\d{1,3}$") || cleanRoomId.equalsIgnoreCase("localhost") || cleanRoomId.equals("127.0.0.1")) {
+            localTarget = cleanRoomId;
+            publicTarget = cleanRoomId;
+            actualRoomId = "DIRECT_" + cleanRoomId.replace(".", "_");
+        } else {
+            String[] decoded = decodeRoomIdToIps(cleanRoomId);
+            publicTarget = decoded[0];
+            localTarget = decoded[1];
+            actualRoomId = cleanRoomId;
+        }
+
+        // Track the active room ID so the Join guard can detect self-joins.
+        if (isCreate) {
+            activeRoomId = roomId;
+        } else {
+            activeRoomId = null; // joining another room — clear until confirmed
+        }
+
+        final VideoService serviceInstance = new VideoService(
+                "127.0.0.1", SessionState.VIDEO_PORT, username,
                 img -> localView.setImage(img),
                 (peerName, img) -> updateRemoteFrame(peerName, img),
                 msg -> {
@@ -417,6 +647,7 @@ public class VideoTab extends Tab {
                         String[] parts = msg.split("ID: ");
                         if (parts.length > 1) {
                             String id = parts[1].trim();
+                            activeRoomId = id; // confirm active room on server ack
                             Platform.runLater(() -> {
                                 roomIdLabel.setText("Room ID: " + id);
                                 leaveBtn.setDisable(false);
@@ -446,27 +677,123 @@ public class VideoTab extends Tab {
                     }
                 }
         );
+        videoService = serviceInstance;
 
         new Thread(() -> {
-            try {
-                videoService.connect();
-                Platform.runLater(() -> {
+            boolean connected = false;
+            String workingHost = "127.0.0.1";
+
+            // 1. Check if the target room is hosted on the embedded local server first
+            //    If yes, use localhost directly — this bypasses the self-IP loopback check
+            //    and enables the host machine to join its own room without false failures.
+            com.javaplatform.server.VideoRelayServer localServer = com.javaplatform.server.AppServer.getVideoServer();
+            boolean roomIsLocal = localServer != null && (
+                localServer.hasRoom(actualRoomId) ||
+                (localServer.hasAnyRoom() && (actualRoomId.equals("DIRECT_" + localTarget.replace(".", "_")) || isCreate))
+            );
+
+            if (roomIsLocal) {
+                // Room is on this machine's embedded server — connect via localhost
+                System.out.println("[VideoTab] Room '" + actualRoomId + "' is hosted locally. Forcing localhost connection.");
+                try {
+                    serviceInstance.connect("127.0.0.1");
+                    connected = true;
+                    workingHost = "127.0.0.1";
+                } catch (Exception localEx) {
+                    System.out.println("[VideoTab] Localhost connection failed: " + localEx.getMessage());
+                }
+            }
+
+            // 2. Try local (LAN/virtual) IP — skip if it matches our own physical IP (prevents false self-loopback)
+            String myIp = getLocalIPAddress();
+            boolean isSelfPhysical = !roomIsLocal && localTarget.equals(myIp)
+                    && !localTarget.equals("127.0.0.1") && !localTarget.equals("localhost");
+            if (!connected && !isSelfPhysical) {
+                try {
+                    System.out.println("[VideoTab] Attempting connection to local target: " + localTarget);
+                    serviceInstance.connect(localTarget);
+                    connected = true;
+                    workingHost = localTarget;
+                } catch (Exception localEx) {
+                    System.out.println("[VideoTab] Local connection failed: " + localEx.getMessage());
+                }
+            } else if (!connected) {
+                System.out.println("[VideoTab] Skipping local target connection (resolved to self IP): " + localTarget);
+            }
+
+            // 2. Try public IP if local failed and they are different (and not 0.0.0.0)
+            if (!connected && !publicTarget.equals(localTarget) && !publicTarget.equals("0.0.0.0")) {
+                try {
+                    System.out.println("[VideoTab] Attempting connection to public target: " + publicTarget);
+                    serviceInstance.connect(publicTarget);
+                    connected = true;
+                    workingHost = publicTarget;
+                } catch (Exception publicEx) {
+                    System.out.println("[VideoTab] Public connection failed: " + publicEx.getMessage());
+                }
+            }
+
+            // 3. Fallback: discover local hosts on the subnet if both direct connections failed
+            if (!connected && !isCreate) {
+                System.out.println("[VideoTab] Direct connections failed. Attempting local network discovery...");
+                java.util.List<String> candidates = discoverLocalHosts();
+                for (String candidate : candidates) {
+                    try {
+                        System.out.println("[VideoTab] Discovered local candidate: " + candidate + ". Attempting connection...");
+                        serviceInstance.connect(candidate);
+                        connected = true;
+                        workingHost = candidate;
+                        break;
+                    } catch (Exception candidateEx) {
+                        System.out.println("[VideoTab] Candidate connection failed: " + candidateEx.getMessage());
+                    }
+                }
+            }
+
+            // 4. WAN relay via SSH tunnel (serveo.net) — final fallback for cross-internet peers
+            if (!connected && !isCreate && relayTarget != null) {
+                try {
+                    String relayHost = relayTarget.split(":")[0];
+                    int    relayPort = Integer.parseInt(relayTarget.split(":")[1]);
+                    System.out.println("[VideoTab] Attempting WAN relay: " + relayTarget);
+                    // Connect VideoService to the relay host; the relay will forward to host's port 9002
+                    serviceInstance.connectToRelay(relayHost, relayPort);
+                    connected = true;
+                    workingHost = relayTarget;
+                } catch (Exception relayEx) {
+                    System.out.println("[VideoTab] WAN relay connection failed: " + relayEx.getMessage());
+                }
+            }
+
+            final boolean success = connected;
+            final String resolvedHost = workingHost;
+
+            Platform.runLater(() -> {
+                if (success) {
                     ThemeManager tm = ThemeManager.getInstance();
-                    statusLabel.setText("● Connected to video server");
+                    statusLabel.setText("● Connected to video server at " + resolvedHost);
                     statusLabel.setStyle("-fx-text-fill: " + tm.runColor() + "; -fx-font-size: 12px;");
-                    videoService.joinRoom(roomId);
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> {
+                    
+                    SessionState.getInstance().setServerHost(resolvedHost);
+                    if (MainWindow.getChatTab() != null) {
+                        MainWindow.getChatTab().reconnectToHost(resolvedHost);
+                    }
+
+                    if (isCreate) {
+                        serviceInstance.createRoom(actualRoomId);
+                    } else {
+                        serviceInstance.joinRoom(actualRoomId);
+                    }
+                } else {
                     ThemeManager tm = ThemeManager.getInstance();
-                    statusLabel.setText("✘ Video server unreachable: " + e.getMessage());
+                    statusLabel.setText("✘ Video server unreachable on both local & public IPs");
                     statusLabel.setStyle("-fx-text-fill: " + tm.errorColor() + "; -fx-font-size: 12px;");
                     reconnectBtn.setVisible(true);
                     reconnectBtn.setManaged(true);
                     localView.setImage(null);
                     clearAllRemoteViews();
-                });
-            }
+                }
+            });
         }, "video-reconnect-join").start();
     }
 }

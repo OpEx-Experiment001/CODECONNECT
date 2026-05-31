@@ -71,12 +71,33 @@ public class VideoRelayServer implements Runnable {
         creator.roomId = roomId;
     }
 
+    /** Returns true if the server is currently hosting the given room ID. */
+    public boolean hasRoom(String roomId) {
+        return rooms.containsKey(roomId);
+    }
+
+    /** Returns true if the server has ANY active room. */
+    public boolean hasAnyRoom() {
+        return !rooms.isEmpty();
+    }
+
     /** Returns true if joined, false if room doesn't exist or full */
     boolean joinRoom(String roomId, PeerHandler joiner) {
         List<PeerHandler> room = rooms.get(roomId);
+        if (room == null) {
+            // Mismatch or fallback: if rooms has any active room, let the joiner join that room
+            if (!rooms.isEmpty()) {
+                String alternativeId = rooms.keySet().iterator().next();
+                room = rooms.get(alternativeId);
+                System.out.println("[VideoRelayServer] Room " + roomId + " not found, falling back to active room: " + alternativeId);
+                joiner.roomId = alternativeId;
+            }
+        }
         if (room == null || room.size() >= 6) return false;
+        if (joiner.roomId == null) {
+            joiner.roomId = roomId;
+        }
         room.add(joiner);
-        joiner.roomId = roomId;
         // notify existing peers about the new joiner, and notify the new joiner about existing peers
         for (PeerHandler p : room) {
             if (p != joiner) {
