@@ -1,16 +1,34 @@
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\service\ErrorAnalyser.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\view\LoginView.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\server\ChatServer.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\SessionState.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\service\CompilerResult.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\service\CompilerService.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\view\ChatTab.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\MainApp.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\server\VideoRelayServer.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\service\AIService.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\view\CompilerTab.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\view\AIAssistantTab.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\view\MainWindow.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\server\AppServer.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\service\VideoService.java
-C:\Users\devan\OneDrive\Desktop\java pbl\src\main\java\com\javaplatform\view\VideoTab.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\service\AICodeAssistant.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\rag\DocumentLoader.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\server\VideoRelayServer.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\AIAssistantTab.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\rl\Feedback.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\MainApp.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\ThemeManager.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\service\VideoService.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\CompilerTab.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\service\CompilerService.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\rl\FeedbackStore.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\tools\impl\WebSearchTool.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\MainWindow.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\SessionState.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\tools\impl\CodebaseMapperTool.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\tools\impl\ReadFileTool.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\utils\ResponseParser.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\tools\ToolRegistry.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\service\AIService.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\rag\Retriever.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\service\CompilerResult.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\ModernMainWindow.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\memory\Message.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\ChatTab.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\tools\Tool.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\server\ChatServer.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\VideoTab.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\server\AppServer.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\view\LoginView.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\client\AIFactory.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\service\ErrorAnalyser.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\client\AIProvider.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\client\UniversalAIProvider.java
+E:\New folder\Java CodeConnect\src\main\java\com\javaplatform\holyai\memory\ChatSession.java

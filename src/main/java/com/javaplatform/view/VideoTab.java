@@ -108,7 +108,7 @@ public class VideoTab extends Tab {
                     javafx.application.Platform.runLater(() -> {
                         createBtn.setDisable(false);
                         createBtn.setText("Create Room");
-                        reconnectVideoAndChat("localhost", finalRoomId, true);
+                        reconnectVideoAndChat("127.0.0.1", finalRoomId, true);
                     });
                 });
             }, "public-ip-resolver").start();
@@ -615,11 +615,11 @@ public class VideoTab extends Tab {
         final String localTarget;
         final String publicTarget;
         final String actualRoomId;
-        if (isCreate || host.equals("localhost")) {
-            localTarget = "localhost";
-            publicTarget = "localhost";
+        if (isCreate || host.equals("localhost") || host.equals("127.0.0.1")) {
+            localTarget = "127.0.0.1";
+            publicTarget = "127.0.0.1";
             actualRoomId = cleanRoomId;
-        } else if (cleanRoomId.matches("^(\\d{1,3}\\.){3}\\d{1,3}$") || cleanRoomId.equalsIgnoreCase("localhost")) {
+        } else if (cleanRoomId.matches("^(\\d{1,3}\\.){3}\\d{1,3}$") || cleanRoomId.equalsIgnoreCase("localhost") || cleanRoomId.equals("127.0.0.1")) {
             localTarget = cleanRoomId;
             publicTarget = cleanRoomId;
             actualRoomId = "DIRECT_" + cleanRoomId.replace(".", "_");
@@ -638,7 +638,7 @@ public class VideoTab extends Tab {
         }
 
         final VideoService serviceInstance = new VideoService(
-                "localhost", SessionState.VIDEO_PORT, username,
+                "127.0.0.1", SessionState.VIDEO_PORT, username,
                 img -> localView.setImage(img),
                 (peerName, img) -> updateRemoteFrame(peerName, img),
                 msg -> {
@@ -681,7 +681,7 @@ public class VideoTab extends Tab {
 
         new Thread(() -> {
             boolean connected = false;
-            String workingHost = "localhost";
+            String workingHost = "127.0.0.1";
 
             // 1. Check if the target room is hosted on the embedded local server first
             //    If yes, use localhost directly — this bypasses the self-IP loopback check
@@ -696,9 +696,9 @@ public class VideoTab extends Tab {
                 // Room is on this machine's embedded server — connect via localhost
                 System.out.println("[VideoTab] Room '" + actualRoomId + "' is hosted locally. Forcing localhost connection.");
                 try {
-                    serviceInstance.connect("localhost");
+                    serviceInstance.connect("127.0.0.1");
                     connected = true;
-                    workingHost = "localhost";
+                    workingHost = "127.0.0.1";
                 } catch (Exception localEx) {
                     System.out.println("[VideoTab] Localhost connection failed: " + localEx.getMessage());
                 }
